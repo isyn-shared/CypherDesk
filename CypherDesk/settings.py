@@ -25,9 +25,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRET_KEY = '#r394am$y(&xrwvxye27ny%d45_f-*g3sc7t7203nwp71%$7n%'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'cypherdesk.ru', '37.230.112.63']
 
 # EMAIL settings
 EMAIL_HOST = 'smtp.gmail.com'
@@ -48,8 +48,6 @@ FEEDBACK_TELEGRAM_CHAT_ID = {'feedback': -1001173635794, }
 
 INSTALLED_APPS = [
     'AdminPanel',
-    'MailAgent',
-    'TelegramBot',
     'News',
     'g_recaptcha',
     'LandPage',

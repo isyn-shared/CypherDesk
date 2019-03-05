@@ -1,11 +1,12 @@
 from django.shortcuts import render
-from Feedback.models import FeedbackRecord
-from Feedback.models import FeedbackUserIP
+from Feedback.models import FeedbackRecord, FeedbackUserIP
 from django.http import HttpResponse, Http404, HttpResponseRedirect
 from django.conf import settings
 from g_recaptcha.validate_recaptcha import validate_captcha
 import requests, re, distance, simplejson
 from datetime import datetime, timezone, timedelta
+from CypherDesk.MailAgent import send as sendMail
+from CypherDesk.TelegramBot import send as SendTelegram
 
 context = {
     'GOOGLE_RECAPTCHA_SITE_KEY': settings.GOOGLE_RECAPTCHA_SITE_KEY,
@@ -19,9 +20,9 @@ def index (request):
     result = {}
     result['ready'] = True
     if FeedbackUserIP.objects.filter(user_ip=IP):
-        user_hist_date = FeedbackUserIP.objects.filter(user_ip=IP)[0].date
-        period = now() - user_hist_date
-        if period.days == 0 and period.seconds < 60 * 60 * 2:
+        feedback = FeedbackUserIP.objects.filter(user_ip=IP)[0]
+        period = now() - feedback.date
+        if period.days == 0 and period.seconds < 60 * 60 and feedback.requests >= 15:
             result['ready'] = False
 
     return render(request, 'Feedback/wrapper.html', result)
@@ -32,70 +33,56 @@ def regexMail(mail):
         return True
     return False
 
-#@validate_captcha
 def send (request):
     if request.POST:
-        ADD_IP_F = False
-        UPDATE_IP_F = False
-        IP = str(request.META['REMOTE_ADDR'])
+        ip = str(request.META['REMOTE_ADDR'])
+        if FeedbackUserIP.objects.filter(user_ip=ip):
+            feedback = FeedbackUserIP.objects.filter(user_ip=ip)[0]
 
-        if FeedbackUserIP.objects.filter(user_ip=IP):
-            user_hist_date = FeedbackUserIP.objects.filter(user_ip=IP)[0].date
-            period = now() - user_hist_date
-            if period.days > 0 or period.seconds > 60 * 60 * 2:
-                UPDATE_IP_F = True
+            period = now() - feedback.date
+            if period.days >0 or period.seconds > 60 * 10:
+                feedback.requests = 0
+
+            if feedback.requests > 15:
+                return HttpResponse(2)
             else:
-                return HttpResponse(2) #превысили лимит запросов
+                feedback.requests += 1
+                feedback.date = now()
+                feedback.save()
         else:
-            ADD_IP_F = True
+            FeedbackUserIP.objects.create(user_ip=ip, date=now())
 
-        feedback_data = request.POST
-        user_name = feedback_data['user_name']
-        user_email = feedback_data['user_email']
-        message_title = feedback_data['message_title']
-        message_text = feedback_data['message_text']
+        userName = request.POST['user_name']
+        userMail = request.POST['user_email'] 
+        msgTitle = request.POST['message_title']
+        msgText = request.POST['message_text']
 
-        if not user_name or not regexMail(user_email) or not message_title or not message_text:
+        if not userName or not regexMail(userMail) or not msgText or not msgTitle:
+            print("ERROR WITH DATA!")
             return HttpResponse(1)
 
         """sending emails"""
         static_mail_files_path = "/Feedback/templates/Feedback/mail/"
         from_email = settings.EMAIL_HOST_USER
         email_subject = open(settings.BASE_DIR + static_mail_files_path + "title.txt").read()
-        email_subject = re.sub("{TITLE}", message_title, email_subject)
+        email_subject = re.sub("{TITLE}", msgTitle, email_subject)
         email_html_content = open(settings.BASE_DIR + static_mail_files_path + "body.html").read()
-        email_html_content = re.sub("{TITLE}", message_title, email_html_content)
-        email_html_content = re.sub("{USERNAME}", user_name, email_html_content)
+        email_html_content = re.sub("{TITLE}", msgTitle, email_html_content)
+        email_html_content = re.sub("{USERNAME}", userName, email_html_content)
         email_html_content = re.sub("{CONTACTLINK}", open(settings.BASE_DIR + static_mail_files_path + 'contactlink.txt').read(),
                                     email_html_content)
         email_text_content = ""
 
-        FeedbackRecord.objects.create(title=message_title, problem=message_text, answer="", user_name=user_name,
-                                      user_email=user_email)
-
-        """post request on telegram app"""
-        telegram_message = "User name: " + user_name + "\nUser email: " + user_email + "\nTitle: " + message_title + "\nMessage: " + message_text
-        url = settings.HOSTNAME + 'telegram/send/'
-        data = {'chat_name': 'feedback', 'token_name': 'feedback', 'text': telegram_message}
-        result_telegram = requests.post(url, data=data).text
-
-        """post request on MailAgent app"""
-        url = settings.HOSTNAME + 'mail/send/'
-        data = {'from': from_email, 'subject': email_subject, 'html_content': email_html_content, 'text_content': email_text_content,
-                'to': user_email}
-        result_mail = requests.post(url, data=data).text
-
-        if not result_mail:
-            result = 1 # не удалось отправить почту
-        else:
-            if UPDATE_IP_F:
-                FeedbackUserIP.objects.filter(user_ip=IP).update(date=now())
-            if ADD_IP_F:
-                FeedbackUserIP.objects.create(user_ip=IP, date=now())
-            result = 0
-        return HttpResponse(result)
+        FeedbackRecord.objects.create(title=msgTitle, problem=msgText, answer="", user_name=userName,
+                                      user_email=userMail)
+        sendMail(from_email, email_subject, email_html_content, email_text_content, userMail)
+        telegram_msg = 'Name: ' + userName + '\nTitle: ' + msgTitle + \
+                           '\nMessage: ' + msgText + '\nMail: ' + userMail + '\nuser IP: ' + ip
+        SendTelegram(settings.FEEDBACK_TELEGRAM_BOT_KEY["feedback"],
+                    settings.FEEDBACK_TELEGRAM_CHAT_ID["feedback"], telegram_msg)
+        return HttpResponse(0)
     raise Http404()
-
+    
 def sort_col(i):
     return i['dis']
 
@@ -120,7 +107,6 @@ def found_titles (request):
 
         result = simplejson.dumps(result)
         return HttpResponse(result)
-    raise Http404()
 
 def ComparsionTitles (s1, s2):
     arr1 = s1.split(' ')

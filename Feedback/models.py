@@ -13,6 +13,7 @@ class FeedbackRecord (models.Model):
 class FeedbackUserIP (models.Model):
     user_ip = models.CharField(max_length=64)
     date = models.DateTimeField()
+    requests = models.IntegerField(default=0)
 
     def __str__(self):
         return 'Feedback users IP`s: {}'.format(self.user_ip)

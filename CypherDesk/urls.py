@@ -11,8 +11,6 @@ urlpatterns = [
     path('standart_admin/', admin.site.urls),
     path('feedback/', include('Feedback.urls')),
     path('news/', include('News.urls')),
-    path('telegram/', include('TelegramBot.urls')),
-    path('mail/', include('MailAgent.urls')),
 ]
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
